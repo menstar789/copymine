@@ -1,0 +1,152 @@
+defaultTasks 'fullBuild'
+
+buildscript {
+    repositories {
+        jcenter()
+        maven {
+            name = "forge"
+            url = "http://files.minecraftforge.net/maven"
+        }
+        maven {
+            name = "sonatype"
+            url = "https://oss.sonatype.org/content/repositories/snapshots/"
+        }
+    }
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:2.2-SNAPSHOT'
+    }
+}
+
+apply plugin: 'idea'
+
+idea {
+    module {
+        // For some reason this is necessary for IDEA 2014 workspaces to recognize assets
+        inheritOutputDirs = true
+    }
+}
+
+apply plugin: 'net.minecraftforge.gradle.forge'
+
+repositories {
+    maven {
+        name 'ForgeFS'
+        url 'http://files.minecraftforge.net/maven'
+    }
+    maven {
+        name 'amadornes'
+        url "http://maven.amadornes.com/"
+    }
+    maven {
+        name 'prog'
+        url "http://dvs1.progwml6.com/files/maven"
+    }
+}
+
+// Define properties file
+ext.configFile = file "build.properties"
+
+configFile.withReader {
+    // Load config. It shall from now be referenced as simply config or project.config
+    def prop = new Properties()
+    prop.load(it)
+    project.ext.config = new ConfigSlurper().parse prop
+}
+
+version = "${config.minecraft_version}-${config.mod_version}." + (System.env.BUILD_NUMBER ?: "homebaked")
+archivesBaseName = "MekanismAll"
+libsDirName = "../output"
+distsDirName = "../output"
+sourceCompatibility = '1.8'
+targetCompatibility = '1.8'
+
+minecraft {
+    version = config.minecraft_version + "-" + config.forge_version
+    mappings = "${config.mappings_version}"
+    runDir = "run"
+    useDepAts = true
+}
+
+dependencies {
+    deobfCompile "MCMultiPart:MCMultiPart-experimental:${config.mcmp_version}:universal"
+    deobfCompile "mezz.jei:jei_${config.minecraft_version}:${config.jei_version}"
+}
+
+processResources
+{
+    // copy everything else, thats not the mcmod.info
+    from(sourceSets.main.resources.srcDirs) {
+        exclude 'mcmod.info'
+        exclude '**/*.blend*'
+    }
+}
+
+task coreJar(type: Jar) {
+    baseName = 'Mekanism'
+
+    manifest {
+        attributes 'FMLCorePlugin': 'mekanism.common.launch.LoadingHook'
+        attributes 'FMLCorePluginContainsFMLMod': 'true'
+    }
+
+    from('etc/core') {
+        include '*.info'
+        expand 'version':config.mod_version,'mc_version':config.minecraft_version,'mcmp_version':config.mcmp_version
+    }
+
+    from zipTree(jar.outputs.getFiles().getSingleFile()).matching {
+        exclude 'mekanism/tools/**', 'mekanism/generators/**', 'assets/mekanismtools/**', 'assets/mekanismgenerators/**', 'mcmod.info'
+    }
+}
+
+task toolsJar(type: Jar) {
+    baseName = 'MekanismTools'
+
+    from('etc/tools') {
+        include '*.info'
+        expand 'version':config.mod_version,'mc_version':config.minecraft_version,'mcmp_version':config.mcmp_version
+    }
+
+    from zipTree(jar.outputs.getFiles().getSingleFile()).matching {
+        include 'mekanism/tools/**', 'assets/mekanismtools/**'
+    }
+}
+
+task generatorsJar(type: Jar) {
+    baseName = 'MekanismGenerators'
+
+    from('etc/generators') {
+        include '*.info'
+        expand 'version':config.mod_version,'mc_version':config.minecraft_version,'mcmp_version':config.mcmp_version
+    }
+
+    from zipTree(jar.outputs.getFiles().getSingleFile()).matching {
+        include 'mekanism/generators/**', 'assets/mekanismgenerators/**'
+    }
+}
+
+coreJar.dependsOn('reobfJar')
+toolsJar.dependsOn('reobfJar')
+generatorsJar.dependsOn('reobfJar')
+
+task MDKZip(type: Zip) {
+    baseName = 'MDK'
+    from sourceSets.main.java.srcDirs
+    include 'mekanism/api/**'
+}
+
+task releaseJars(type: Copy) {
+    from coreJar
+    from toolsJar
+    from generatorsJar
+    from MDKZip
+    rename '-(.*)jar', '.jar'
+    rename '-(.*)zip', '.zip'
+    into '.'
+}
+
+task fullBuild(type: Delete) {
+    delete jar
+}
+
+fullBuild.dependsOn('releaseJars')
